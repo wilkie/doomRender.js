@@ -1,0 +1,5 @@
+{
+  "name": "lib-doomRender",
+  "version": "0.1.0",
+  "main": "./dist/doomRender.min.js"
+}

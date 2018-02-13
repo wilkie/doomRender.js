@@ -9,11 +9,10 @@
 var initDoomRender = function (context) {
   initDoomRenderCore(context);
   initDoomRenderCanvas(context);
-  initDoomRenderCanvasRenderer(context);
-  initDoomRenderCanvasTextureSheet(context);
   initDoomRenderWorld(context);
   initDoomRenderViewport(context);
-  initDoomRenderCanvasRenderCache(context);
+  initDoomRenderOrthographic(context);
+  initDoomRenderVendor(context);
 
   return context.initDoomRender;
 };

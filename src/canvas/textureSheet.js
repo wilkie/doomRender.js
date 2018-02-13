@@ -30,13 +30,13 @@ function initDoomRenderCanvasTextureSheet(context) {
 
     var context = this._canvas.getContext('2d');
 
-    if (this._curX + (texture.width()*2) + 2 > this._width) {
+    if (this._curX + (texture.width() + 7) > this._width) {
       if (this._curHeight == 0) {
         return;
       }
 
       this._curX = 0;
-      this._curY += this._curHeight + 2;
+      this._curY += this._curHeight;
       this._curHeight = 0;
     }
 
@@ -51,10 +51,17 @@ function initDoomRenderCanvasTextureSheet(context) {
       data[i + 3] = 255; //rgbaBuffer[i + 3];
     }
 
+    // Texture
     context.putImageData(imageData, this._curX, this._curY);
-    context.putImageData(imageData, this._curX + texture.width(), this._curY);
-    context.putImageData(imageData, this._curX + texture.width(), this._curY + texture.height());
-    context.putImageData(imageData, this._curX, this._curY + texture.height());
+
+    // Right Edge
+    context.putImageData(imageData, this._curX + texture.width(), this._curY, 0, 0, 5, texture.height());
+
+    // Bottom-right Corner
+    context.putImageData(imageData, this._curX + texture.width(), this._curY + texture.height(), 0, 0, 5, 5);
+
+    // Bottom Edge
+    context.putImageData(imageData, this._curX, this._curY + texture.height(), 0, 0, texture.width(), 5);
 
     ret = {
       "x": this._curX,
@@ -67,9 +74,9 @@ function initDoomRenderCanvasTextureSheet(context) {
     }
     this._lookup[texture.namespace()][texture.name()] = ret;
 
-    this._curX += (texture.width() * 2) + 2;
-    if (texture.height() * 2 > this._curHeight) {
-      this._curHeight = texture.height() * 2;
+    this._curX += texture.width() + 7;
+    if (texture.height() + 7 > this._curHeight) {
+      this._curHeight = texture.height() + 7;
     }
 
     return ret;

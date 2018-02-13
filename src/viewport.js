@@ -3,17 +3,21 @@ function initDoomRenderViewport(context) {
    * Constructor
    */
 
-  var Viewport = context.DoomRender.Viewport = function(world, width, height) {
+  var Viewport = context.DoomRender.Viewport = function(type, world, canvas, x, y, width, height) {
     var self = this;
 
+    self._type = type;
     self._world = world;
     self._width = width;
     self._height = height;
-    self._worldX = 0;
-    self._worldY = 0;
-    self._scale = 1.0;
+    self.reset();
 
-    self._renderer = new context.DoomRender.Canvas.Renderer();
+    if (type === "canvas") {
+      self._renderer = new context.DoomRender.Canvas.Renderer();
+    }
+    else if (type === "orthographic") {
+      self._renderer = new context.DoomRender.Orthographic.Renderer();
+    }
 
     return self;
   };
@@ -27,29 +31,39 @@ function initDoomRenderViewport(context) {
     };
   };
 
-  Viewport.prototype.resize = function(width, height) {
-    this._width  = width;
-    this._height = height;
+  Viewport.prototype.reset = function() {
+    self._worldX = 0;
+    self._worldY = 0;
+    self._scale = 1.0;
+  };
+
+  Viewport.prototype.resize = function(canvas, width, height) {
+    this._width  = width  || canvas.clientWidth;
+    this._height = height || canvas.clientHeight;
+
+    if (this._renderer && this._context) {
+      this._renderer.resize(this._context, canvas, width, height)
+    }
 
     return this;
   };
 
   Viewport.prototype.x = function(x) {
     if (x === undefined) {
-      return this._worldX + (this._width  * (1 / this._scale)) / 2;
+      return this._worldX;// + (this._width  * (1 / this._scale)) / 2;
     }
 
-    this._worldX = x - (this._width  * (1 / this._scale)) / 2;
+    this._worldX = x;// - (this._width  * (1 / this._scale)) / 2;
 
     return this;
   };
 
   Viewport.prototype.y = function(y) {
     if (y === undefined) {
-      return this._worldY + (this._height  * (1 / this._scale)) / 2;
+      return this._worldY;// + (this._height  * (1 / this._scale)) / 2;
     }
 
-    this._worldY = y - (this._height  * (1 / this._scale)) / 2;
+    this._worldY = y;// - (this._height  * (1 / this._scale)) / 2;
 
     return this;
   };
@@ -102,21 +116,89 @@ function initDoomRenderViewport(context) {
 
     return rectIntersect(boundingBox, viewportBox);
   };
-
-  Viewport.prototype.render = function(canvas, x, y) {
+  
+  Viewport.prototype.prepare = function(canvas, x, y) {
     var self = this;
 
-    var sectors  = this._world.level().sectors();
-    var sectorCount = 0;
-    var context = canvas.getContext('2d');
-    self._renderer.fill(context, 'black', 0, 0, self._width, self._height);
-    sectors.forEach(function(sector) {
-      if (self.isVisible(sector)) {
-        sectorCount += 1;
-        self._renderer.drawSector(context, sector, self._worldX, self._worldY, self._scale);
-      }
-    });
+    if (self._world) {
+      self._context = self._renderer.getContext(canvas);
+
+      self._renderer.lookAt(self._context, self._worldX, self._worldY, self._scale);
+
+      // Clear
+      self._renderer.fill(self._context, 'black', 0, 0, self._width, self._height);
+
+      // Draw Sectors (floors/ceilings)
+      var boundingBox = self._world.level().boundingBox();
+      var sectors  = self._world.level().sectors();
+      var sectorCount = 0;
+      var sector = sectors[31];
+      sectors.forEach(function(sector) {
+        //if (self.isVisible(sector)) {
+          sectorCount += 1;
+          self._renderer.drawSector(self._context, sector, boundingBox, self._worldX, self._worldY, self._scale);
+        //}
+      });
+
+      // Draw Walls
+      var lineDefs = self._world.level().lineDefs();
+      lineDefs.forEach(function(lineDef) {
+        //if (self.isVisible(sector)) {
+          self._renderer.drawWall(self._context, lineDef, self._worldX, self._worldY, self._scale);
+        //}
+      });
+
+      self._prepared = true;
+
+      // Render
+      self._renderer.render(self._context);
+    }
 
     return this;
+  };
+
+  Viewport.prototype.render = function(canvas, x, y) {
+    if (!this._prepared) {
+      this.prepare(canvas, x, y);
+    }
+
+    if (this._prepared && this._renderer && this._context) {
+      this._renderer.lookAt(this._context, this._worldX, this._worldY, this._scale);
+      this._renderer.render(this._context);
+    }
+
+    return this;
+  };
+
+  Viewport.prototype.world = function(world) {
+    var self = this;
+
+    if (world === undefined) {
+      return self._world;
+    }
+
+    self._world = world;
+
+    this._renderer.clear();
+    this._prepared = false;
+
+    // Load Sectors (floors/ceilings)
+    var sectors  = self._world.level().sectors();
+    var sectorCount = 0;
+    var sector = sectors[0];
+    //sectors.forEach(function(sector) {
+    
+      sectorCount += 1;
+      self._renderer.loadSector(sector);
+    
+    //});
+
+    // Load Walls
+    var lineDefs = self._world.level().lineDefs();
+    lineDefs.forEach(function(lineDef) {
+      self._renderer.loadWall(lineDef);
+    });
+
+    return self;
   };
 }

@@ -8,4 +8,9 @@ function initDoomRenderCanvas(context) {
 
     return self;
   };
+
+  // Initialize subclasses
+  initDoomRenderCanvasRenderer(context);
+  initDoomRenderCanvasTextureSheet(context);
+  initDoomRenderCanvasRenderCache(context);
 }

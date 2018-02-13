@@ -3,15 +3,28 @@ module.exports = function(grunt) {
 
   // Helper methods
   function wrapModules(head, tail) {
+    //return head.concat(MODULE_LIST).concat(VENDOR_HEAD_LIST).concat(VENDOR_LIST).concat(VENDOR_TAIL_LIST).concat(tail);
     return head.concat(MODULE_LIST).concat(tail);
   }
 
   // Add modules:
   var MODULE_LIST = grunt.file.expand(['src/**/*.js',
                          '!src/doomRender.intro.js',
+                         //'!src/doomRender.vendor.intro.js',
+                         //'!src/doomRender.vendor.outro.js',
                          '!src/doomRender.const.js',
                          '!src/doomRender.core.js',
                          '!src/doomRender.outro.js']);
+
+  var VENDOR_HEAD_LIST = [
+    'src/doomRender.vendor.intro.js'
+  ];
+
+  var VENDOR_TAIL_LIST = [
+    'src/doomRender.vendor.outro.js'
+  ];
+
+  var VENDOR_LIST = grunt.file.expand(['vendor/**/*.js']);
 
   var DIST_HEAD_LIST = [
       'src/doomRender.intro.js',

@@ -60,4 +60,33 @@ function initDoomRenderCore (context) {
   // development and testing, but should be private in the compiled binaries.
   if (DEBUG) {
   }
+
+  DoomRender.loadScript = function(url, callback) {
+    var rootPath = "/";
+    var scriptElements = document.getElementsByTagName('script');
+    for (var i = 0; i < scriptElements.length; i++) {
+      var src = scriptElements[i].src;
+      if (src.match('doomRender[.](min[.])?js$')) {
+        rootPath = src;
+        rootPath = rootPath.replace('doomRender.js', '');
+        rootPath = rootPath.replace('doomRender.min.js', '');
+        break;
+      }
+    }
+    url = rootPath + url;
+
+    var head = document.getElementsByTagName('head')[0];
+
+    var script  = document.createElement('script');
+    script.type = 'text/javascript';
+    script.src  = url;
+
+    // Then bind the event to the callback function.
+    // There are several events for cross browser compatibility.
+    script.onreadystatechange = callback;
+    script.onload = callback;
+
+    // Fire the loading
+    head.appendChild(script);
+  };
 }

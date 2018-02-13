@@ -10,9 +10,19 @@ function initDoomRenderCanvasRenderer(context) {
     self._cache = new context.DoomRender.Canvas.RenderCache();
 
     // And a flat sheet
-    self._flatSheet = new context.DoomRender.Canvas.TextureSheet(640, 640);
+    self._flatSheet = new context.DoomRender.Canvas.TextureSheet(1024, 1024);
 
     return self;
+  };
+
+  Renderer.prototype.getContext = function(canvas) {
+    return canvas.getContext('2d');
+  };
+
+  Renderer.prototype.loadSector = function(sector) {
+  };
+
+  Renderer.prototype.loadWall = function(lineDef) {
   };
 
   Renderer.prototype.fill = function(context, fillStyle, x, y, width, height) {
@@ -20,7 +30,10 @@ function initDoomRenderCanvasRenderer(context) {
     context.fillStyle = fillStyle;
     context.fillRect(x, y, width, height);
     return this;
-  }
+  };
+
+  Renderer.prototype.drawWall = function(context, lineDef, x, y, scale) {
+  };
 
   Renderer.prototype.drawSector = function(context, sector, x, y, scale) {
     context.smoothingEnabled = false;

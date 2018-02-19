@@ -1,4 +1,4 @@
-/*! lib-doomRender - v0.1.0 - 2018-02-13 - wilkie */
+/*! lib-doomRender - v0.1.0 - 2018-02-19 - wilkie */
 ;(function (global) {
 
 /*jslint browser: true*/
@@ -454,6 +454,10 @@ function initDoomRenderOrthographic(context) {
 
 // TEXTURE ALIGNMENT / PEGGING (done for lower textures!)
 // MIDDLE TEXTURE GEOMETRY
+//
+// REUSE TEXTURES
+
+const cullWalls = false;
 
 function initDoomRenderOrthographicRenderer(context) {
   var Renderer = context.DoomRender.Orthographic.Renderer = function() {
@@ -537,18 +541,20 @@ function initDoomRenderOrthographicRenderer(context) {
     context.render(self._scene, self._camera);
   };
 
+  Renderer.prototype.interpretBrightness = function(brightness) {
+    brightness = Math.max(8, brightness - 64);
+    brightness = 255 * (brightness / 160.0);
+    brightness = Math.floor(Math.min(brightness / 2, 255));
+    return brightness + brightness * 0x100 + brightness * 0x10000;
+  };
+
   Renderer.prototype.drawSector = function(gl, sector, boundingBox, x, y, scale) {
     var self = this;
-
-    console.log(boundingBox);
 
     if (sector._added) {
      // return;
     }
     sector._added = true;
-
-    // Put/retrieve floor texture into/from texture sheet
-    //var floorRegion = this._flatSheet.storeTexture(sector.textureFloor());
 
     // Gather sector vertices
     var polygons = sector.polygons();
@@ -556,7 +562,6 @@ function initDoomRenderOrthographicRenderer(context) {
     var moveX = 0;
     var moveY = 0;
 
-    // Render sector geometry as a clipping region
     polygons.forEach(function(info) {
       var textureMap = function(lower, geo) {
         // Get FLAT for floor/ceiling
@@ -564,19 +569,13 @@ function initDoomRenderOrthographicRenderer(context) {
         if (!lower) {
           texture = sector.textureCeiling();
         }
-        const texFlat = new THREE.DataTexture(texture.rgbaBuffer(),    // data
-                                              texture.width(),         // width
-                                              texture.height(),        // height
-                                              THREE.RGBAFormat,        // format
-                                              THREE.UnsignedByteType,  // type
-                                              THREE.UVMapping,         // mapping
-                                              THREE.RepeatWrapping,    // wrapS
-                                              THREE.RepeatWrapping);   // wrapT
-        texFlat.repeat.set(1.0/64.0, 1.0/64.0);
-        texFlat.needsUpdate = true;
+        const texFlat = self.createTexture(texture);
+
+        const brightness = self.interpretBrightness(sector.brightness());
 
         const matFlat = new THREE.MeshLambertMaterial({
-          map:   texFlat
+          map:   texFlat,
+          color: brightness
         });
         const matUnknown = new THREE.MeshLambertMaterial({
           color: 0xffffff
@@ -638,72 +637,87 @@ function initDoomRenderOrthographicRenderer(context) {
 
             if (lineDef) {
               face.materialIndex = unknownMaterial;
-              [lineDef.leftSideDef(), lineDef.rightSideDef()].forEach(function(sideDef, side) {
-                const backSideDef = (side == 0 ? lineDef.rightSideDef() : lineDef.leftSideDef());
-                if (sideDef) {
-                  var texture = sideDef.textureLower();
-                  if (!lower) {
-                    texture = sideDef.textureUpper();
+              const frontSideDef = [lineDef.leftSideDef(), lineDef.rightSideDef()].filter(function(sideDef) {
+                return sideDef && sideDef.sector() !== sector;
+              })[0];
+              const backSideDef = [lineDef.leftSideDef(), lineDef.rightSideDef()].filter(function(sideDef) {
+                return sideDef && sideDef.sector() === sector;
+              })[0];
+              if (frontSideDef) {
+                var texture = frontSideDef.textureLower();
+                if (!lower) {
+                  texture = frontSideDef.textureUpper();
+                }
+
+                if (!lower && frontSideDef.sector().textureCeiling().name() == "F_SKY1" && backSideDef) {
+                  // Do not render the upper parts of sectors that both have sky ceilings
+                  if (backSideDef.sector().textureCeiling().name() == frontSideDef.sector().textureCeiling().name()) {
+                    return;
                   }
-                  if (texture) {
-                    const texSide = new THREE.DataTexture(texture.rgbaBuffer(),    // data
-                                                          texture.width(),         // width
-                                                          texture.height(),        // height
-                                                          THREE.RGBAFormat,        // format
-                                                          THREE.UnsignedByteType,  // type
-                                                          THREE.UVMapping,         // mapping
-                                                          THREE.RepeatWrapping,    // wrapS
-                                                          THREE.RepeatWrapping);   // wrapT
-                    texSide.repeat.set(1.0/texture.width(), 1.0/texture.height());
-                    texSide.needsUpdate = true;
-
-                    const matSide = new THREE.MeshLambertMaterial({
-                      map: texSide
-                    });
-
-                    mats.push(matSide);
-                    face.materialIndex = mats.length - 1;
-
-                    geo.faceVertexUvs[0][faceIndex].forEach(function(coord, i) {
-                      // Get the position on the line
-                      const geoCoord = geo.vertices[[face.a, face.b, face.c][i]];
-
-                      // Pin the texture to the left of the linedef
-                      if ((lineDef.start().y != lineDef.end().y && geoCoord.y == lineDef.start().y) ||
-                          (lineDef.start().y == lineDef.end().y && geoCoord.x == lineDef.start().x)) {
-                        coord.x = 0;
-                      }
-                      else {
-                        //coord.x = Math.sqrt((x2-x1) * (x2-x1) + (y2-y1) * (y2-y1));
-                        coord.x = lineDef.magnitude();
-                      }
-
-                      // Pin the texture to the top of the face
-                      var amount = boundingBox.floor - sector.floor();
-                      if (lineDef.isLowerUnpegged() && lower) {
-                        amount = boundingBox.floor - sector.ceiling();
-                        amount = -sector.ceiling() + sector.floor();
-                      }
-                      else if (lineDef.isUpperUnpegged() && !lower) {
-                        // Align to the owning ceiling
-                        console.log("upper pegged", sideDef, backSideDef, lineDef);
-                        if (backSideDef) {
-                          amount = -sideDef.sector().ceiling() + backSideDef.sector().ceiling();
-                        }
-                      }
-
-                      amount -= sideDef.textureY();
-
-                      coord.y -= amount;
-
-                      amount = 0;
-                      amount += sideDef.textureX();
-                      coord.x += amount;
-                    });
-                    geo.uvsNeedUpdate = true;
+                  // Render the walls with the ceiling texture other wise
+                  else if (!texture) {
+                    texture = sector.textureCeiling();
                   }
                 }
-              });
+
+                if (texture) {
+                  const texSide = self.createTexture(texture);
+
+                  const matSide = new THREE.MeshLambertMaterial({
+                    map: texSide,
+                    color: self.interpretBrightness(frontSideDef.sector().brightness())
+                  });
+
+                  mats.push(matSide);
+                  face.materialIndex = mats.length - 1;
+
+                  geo.faceVertexUvs[0][faceIndex].forEach(function(coord, i) {
+                    // Get the position on the line
+                    const geoCoord = geo.vertices[[face.a, face.b, face.c][i]];
+
+                    // Pin the texture to the left of the linedef
+                    if ((lineDef.start().y != lineDef.end().y && geoCoord.y == lineDef.start().y) ||
+                        (lineDef.start().y == lineDef.end().y && geoCoord.x == lineDef.start().x)) {
+                      coord.x = 0;
+                    }
+                    else {
+                      coord.x = lineDef.magnitude();
+                    }
+
+                    // Pin the texture to the top of the face
+                    var amount = sector.neighborFloor() - sector.floor();
+                    if (!lower) {
+                      if (lineDef.isUpperUnpegged()) {
+                        // Align to the owning ceiling
+                        if (backSideDef) {
+                          amount = -frontSideDef.sector().ceiling() + backSideDef.sector().ceiling();
+                        }
+                      }
+                      else {
+                        // Align to sector ceiling (i have no idea why this is true)
+                        amount = 1 + (128 - texture.height());
+                      }
+                    }
+                    else {
+                      if (lineDef.isLowerUnpegged()) {
+                        amount = sector.neighborFloor() - frontSideDef.sector().ceiling();
+                      }
+                      else {
+                        amount = sector.neighborFloor() - backSideDef.sector().floor();
+                      }
+                    }
+
+                    amount -= frontSideDef.textureY();
+
+                    coord.y -= amount;
+
+                    amount = 0;
+                    amount += frontSideDef.textureX();
+                    coord.x += amount;
+                  });
+                  geo.uvsNeedUpdate = true;
+                }
+              }
             }
           }
         });
@@ -721,23 +735,36 @@ function initDoomRenderOrthographicRenderer(context) {
         shape.lineTo(vertex.x, vertex.y + moveY);
       });
 
-      shape.holes = info.holes.map(function(holeVertices) {
+      var holes = [];
+      info.holes.forEach(function(holeVertices) {
+        holeVertices = holeVertices.reverse();
         const holeShape = new THREE.Shape();
         holeShape.moveTo(holeVertices[0].x, holeVertices[0].y + moveY);
         holeVertices.slice(1).forEach(function(vertex) {
           holeShape.lineTo(vertex.x, vertex.y + moveY);
         });
 
-        return holeShape;
+        if (holeVertices.length > 2) {
+          holes.push(holeShape);
+        }
       });
 
-      const geo = new THREE.ExtrudeGeometry(shape, { amount: sector.floor() - boundingBox.floor, bevelEnabled: false });
+      shape.holes = holes;
+
+      const floorThickness = sector.floor() - sector.neighborFloor();
+      const geo = new THREE.ExtrudeGeometry(shape, { amount: floorThickness, bevelEnabled: false });
 
       var mats = textureMap(true, geo);
 
       const mesh = new THREE.Mesh(geo, mats);
       mesh.rotation.x = -Math.PI/2;
+      mesh.position.y = sector.neighborFloor();
       self._scene.add(mesh);
+
+      // Adds wireframe
+      /*const mesh2 = new THREE.Mesh(geo, mats[2]);
+      mesh2.rotation.x = -Math.PI/2;
+      self._scene.add(mesh2);*/
 
       var vertices = info.shape;
       const upperShape = new THREE.Shape();
@@ -759,13 +786,13 @@ function initDoomRenderOrthographicRenderer(context) {
         return holeShape;
       });
 
-      const upperGeo = new THREE.ExtrudeGeometry(upperShape, { amount: boundingBox.ceiling - sector.ceiling(), bevelEnabled: false });
+      const upperGeo = new THREE.ExtrudeGeometry(upperShape, { amount: sector.neighborCeiling() - sector.ceiling(), bevelEnabled: false });
 
       var mats = textureMap(false, upperGeo);
 
       const upperMesh = new THREE.Mesh(upperGeo, mats);
       upperMesh.rotation.x = -Math.PI/2;
-      upperMesh.position.y = (sector.ceiling() - sector.floor()) + (sector.floor() - boundingBox.floor);
+      upperMesh.position.y = sector.ceiling();
       self._scene.add(upperMesh);
 
     });
@@ -776,79 +803,192 @@ function initDoomRenderOrthographicRenderer(context) {
     const lines = sector.lineDefs();
 
     lines.forEach(function(lineDef) {
-      [lineDef.leftSideDef(), lineDef.rightSideDef()].forEach(function(sideDef, side) {
-        const backSideDef = (side == 0 ? lineDef.rightSideDef() : lineDef.leftSideDef());
-        if (sideDef && sideDef.sector() == sector) {
+      const frontSideDef = [lineDef.leftSideDef(), lineDef.rightSideDef()].filter(function(sideDef) {
+        return sideDef && sideDef.sector() !== sector;
+      })[0];
+      const backSideDef = [lineDef.leftSideDef(), lineDef.rightSideDef()].filter(function(sideDef) {
+        return sideDef && sideDef.sector() === sector;
+      })[0];
+
+      var doubleSided = frontSideDef && backSideDef;
+
+      [frontSideDef, backSideDef].forEach(function(sideDef, side) {
+        if (sideDef) {
           // Create the mesh
           const shape = new THREE.Shape();
 
           // We need to reverse the vertices since we are inverting the y axis.
           const offsetX = 0;
           const offsetY = 0;
-          shape.moveTo(lineDef.start().x, lineDef.start().y);
-          shape.lineTo(lineDef.end().x,   lineDef.end().y);
-
-          const wallGeo = new THREE.ExtrudeGeometry(shape, { amount: sector.ceiling() - sector.floor(), bevelEnabled: false });
-
-          var mats = [];
+          var start = side == (doubleSided ? 0 : 1) ? lineDef.start() : lineDef.end();
+          var end   = side == (doubleSided ? 0 : 1) ? lineDef.end()   : lineDef.start();
+          shape.moveTo(start.x, start.y);
+          shape.lineTo(end.x,   end.y);
 
           const texture = sideDef.textureMiddle();
+          var mats = [];
+
           if (texture) {
+            // If the sidedef is double sided, the middle wall is only as high as the texture
+            var height = sector.ceiling() - sector.floor();
+            if (doubleSided) {
+              height = Math.min(height, texture.height());
+            }
+
+            const wallGeo = new THREE.ExtrudeGeometry(shape, { amount: height, bevelEnabled: false });
+
             // Pull out the texture
-            const texSide = new THREE.DataTexture(texture.rgbaBuffer(),    // data
-                                                  texture.width(),         // width
-                                                  texture.height(),        // height
-                                                  THREE.RGBAFormat,        // format
-                                                  THREE.UnsignedByteType,  // type
-                                                  THREE.UVMapping,         // mapping
-                                                  THREE.RepeatWrapping,    // wrapS
-                                                  THREE.RepeatWrapping);   // wrapT
-            texSide.repeat.set(1.0/texture.width(), 1.0/texture.height());
-            texSide.needsUpdate = true;
+            const texSide = self.createTexture(texture);
+
+            const brightness = self.interpretBrightness(sideDef.sector().brightness());
 
             // Create the material
             const matSide = new THREE.MeshLambertMaterial({
               map: texSide,
+              color: brightness,
               transparent: true
             });
 
             mats.push(matSide);
 
             wallGeo.faces.forEach(function(face, faceIndex) {
-              wallGeo.faceVertexUvs[0][faceIndex].forEach(function(coord, i) {
-                // Get the position on the line
-                const geoCoord = wallGeo.vertices[[face.a, face.b, face.c][i]];
-
-                // Pin the texture to the left of the linedef
-                if ((lineDef.start().y != lineDef.end().y && geoCoord.y == lineDef.start().y) ||
-                    (lineDef.start().y == lineDef.end().y && geoCoord.x == lineDef.start().x)) {
-                  coord.x = 0;
+              face.materialIndex = null;
+              if ((!cullWalls && !doubleSided) || faceIndex < 2) {
+                if (!doubleSided && faceIndex >= 2) {
+                  if (mats.length == 1) {
+                    // Outer walls that aren't *actually* there should be the same brightness
+                    // Therefore, we add a new material to the wall.
+                    const matUnknownSide = new THREE.MeshLambertMaterial({
+                      map: texSide,
+                      color: self.interpretBrightness(128),
+                      transparent: false
+                    });
+                    mats.push(matUnknownSide);
+                  }
+                  face.materialIndex = 1;
                 }
                 else {
-                  coord.x = lineDef.magnitude();
+                  face.materialIndex = 0;
                 }
+                wallGeo.faceVertexUvs[0][faceIndex].forEach(function(coord, i) {
+                  // Get the position on the line
+                  const geoCoord = wallGeo.vertices[[face.a, face.b, face.c][i]];
 
-                // Pin the texture to the bottom of the face
-                var amount = -sector.ceiling() + sector.floor();
-                amount -= sideDef.textureY();
-                coord.y -= amount;
+                  // Pin the texture to the left of the linedef
+                  if ((start.y != end.y && geoCoord.y == start.y) ||
+                      (start.y == end.y && geoCoord.x == start.x)) {
+                    coord.x = 0;
+                  }
+                  else {
+                    coord.x = lineDef.magnitude();
+                  }
 
-                amount = 0;
-                amount += sideDef.textureX();
-                coord.x += amount;
-              });
+                  // Pin the texture to the bottom of the face
+                  var amount = 0;
+
+                  if (!lineDef.isLowerUnpegged()) {
+                    amount = -height;
+                    amount -= sideDef.textureY();
+                  }
+
+                  amount += sideDef.textureY();
+                  coord.y -= amount;
+
+                  amount = 0;
+                  amount += sideDef.textureX();
+                  coord.x += amount;
+                });
+              }
             });
 
             wallGeo.uvsNeedUpdate = true;
 
-            const wallMesh = new THREE.Mesh(wallGeo, mats[0]);
+            const wallMesh = new THREE.Mesh(wallGeo, mats);
             wallMesh.rotation.x = -Math.PI/2;
-            wallMesh.position.y = sector.floor() - boundingBox.floor;
+
+            var wallY = sideDef.sector().floor();
+            if (doubleSided) {
+              wallY = Math.max(frontSideDef.sector().floor(), backSideDef.sector().floor());
+            }
+            wallMesh.position.y = wallY;
             self._scene.add(wallMesh);
           }
-        }
+        };
       });
     });
+  };
+
+  Renderer.prototype.createTexture = function(texture) {
+    this._textureCache = this._textureCache || {};
+
+    if (!(texture.name() in this._textureCache)) {
+      var textureWidth  = texture.width();
+      var textureHeight = texture.height();
+
+      var data = texture.rgbaBuffer();
+
+      // If the texture is not a power of two, we need to create the texture
+      // by expanding the texture to one that is a power of two and then tiling
+      // it ourselves
+      const isPowerOfTwo = function(n) {
+        return n && (n & (n - 1)) === 0;
+      };
+
+      const nextPowerOfTwo = function(n) {
+        n--;
+        n |= n >> 1;
+        n |= n >> 2;
+        n |= n >> 4;
+        n |= n >> 8;
+        n |= n >> 16;
+        n++;
+
+        return n;
+      };
+
+      if (!isPowerOfTwo(textureWidth) || !isPowerOfTwo(textureHeight)) {
+        textureWidth  = nextPowerOfTwo(textureWidth);
+        textureHeight = nextPowerOfTwo(textureHeight);
+      }
+
+      // Recreate data if the texture is not a power of two
+      if (textureWidth != texture.width() || textureHeight != texture.height()) {
+        var newData = new Uint8Array(textureWidth * textureHeight * 4);
+        for (var y = 0; y < textureHeight; y++) {
+          const origY = y % texture.height();
+          for (var x = 0; x < textureWidth; x++) {
+            const origX = x % texture.width();
+            for (var byteIndex = 0; byteIndex < 4; byteIndex++) {
+              newData[((y * textureWidth + x) * 4) + byteIndex] = data[((origY * texture.width() + origX) * 4) + byteIndex];
+            }
+          }
+        }
+
+        data = newData;
+      }
+
+      var ret = new THREE.DataTexture(
+        data,                    // data
+        textureWidth,            // width
+        textureHeight,           // height
+        THREE.RGBAFormat,        // format
+        THREE.UnsignedByteType,  // type
+        THREE.UVMapping,         // mapping
+        THREE.RepeatWrapping,    // wrapS
+        THREE.RepeatWrapping     // wrapT
+      );
+
+      // Scale the texture to the appropriate relative size
+      // and account for the non mapped area when the texture is not a power of 2
+      ret.repeat.set(1.0/textureWidth, 1.0/textureHeight);
+
+      // Allow this repeat setting to be propagated
+      ret.needsUpdate = true;
+
+      this._textureCache[texture.name()] = ret;
+    }
+
+    return this._textureCache[texture.name()];
   };
 
   Renderer.prototype.loadSector = function(sector) {
@@ -863,8 +1003,11 @@ function initDoomRenderOrthographicRenderer(context) {
     const scene = new THREE.Scene();
     scene.add(this._camera);
 
-    // Ambient Light
-    scene.add( new THREE.AmbientLight( 0x444444 ) );
+    // Ambient Lights
+    scene.add( new THREE.AmbientLight( 0xffffff ) );
+
+    // This lets us oversaturate when the brightness of the textures > a certain amount
+    scene.add( new THREE.AmbientLight( 0xffffff ) );
 
     var dirLight = new THREE.DirectionalLight();
     scene.add(dirLight);
@@ -1021,7 +1164,7 @@ function initDoomRenderViewport(context) {
       var boundingBox = self._world.level().boundingBox();
       var sectors  = self._world.level().sectors();
       var sectorCount = 0;
-      var sector = sectors[31];
+      //sectors = [sectors[1]]; //[sectors[55], sectors[58]];
       sectors.forEach(function(sector) {
         //if (self.isVisible(sector)) {
           sectorCount += 1;
@@ -1074,13 +1217,13 @@ function initDoomRenderViewport(context) {
     // Load Sectors (floors/ceilings)
     var sectors  = self._world.level().sectors();
     var sectorCount = 0;
-    var sector = sectors[0];
-    //sectors.forEach(function(sector) {
+    //var sectors = [sectors[58]];
+    sectors.forEach(function(sector) {
     
       sectorCount += 1;
       self._renderer.loadSector(sector);
     
-    //});
+    });
 
     // Load Walls
     var lineDefs = self._world.level().lineDefs();

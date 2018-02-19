@@ -132,7 +132,7 @@ function initDoomRenderViewport(context) {
       var boundingBox = self._world.level().boundingBox();
       var sectors  = self._world.level().sectors();
       var sectorCount = 0;
-      var sector = sectors[31];
+      //sectors = [sectors[1]]; //[sectors[55], sectors[58]];
       sectors.forEach(function(sector) {
         //if (self.isVisible(sector)) {
           sectorCount += 1;
@@ -185,13 +185,13 @@ function initDoomRenderViewport(context) {
     // Load Sectors (floors/ceilings)
     var sectors  = self._world.level().sectors();
     var sectorCount = 0;
-    var sector = sectors[0];
-    //sectors.forEach(function(sector) {
+    //var sectors = [sectors[58]];
+    sectors.forEach(function(sector) {
     
       sectorCount += 1;
       self._renderer.loadSector(sector);
     
-    //});
+    });
 
     // Load Walls
     var lineDefs = self._world.level().lineDefs();
